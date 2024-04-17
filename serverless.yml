@@ -1,0 +1,67 @@
+service: webhook-service-sls
+frameworkVersion: "3"
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ap-southeast-1
+  stage: ${opt:stage}
+  versionFunctions: false
+  memorySize: 128
+  timeout: 15
+  stackTags:
+    application: lista
+    environment: ${self:provider.stage}
+  environment:
+    CONFIG_PATH: /${self:service}/${self:provider.stage}
+    vpc:
+      subnetIds:
+        - ${ssm:/${self:service}/${self:provider.stage}/SUBNET_1}
+        - ${ssm:/${self:service}/${self:provider.stage}/SUBNET_2}
+        - ${ssm:/${self:service}/${self:provider.stage}/SUBNET_3}
+      securityGroupIds:
+        - ${ssm:/${self:service}/${self:provider.stage}/SECURITY_GROUP}
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "sqs:ReceiveMessage"
+        - "sqs:GetQueueAttributes"
+      Resource:
+        - "arn:aws:sqs:${self:provider.region}:044382218614:lista-dev-webhook-xendit"
+
+custom:
+  serverless-offline-ssm:
+    stages:
+      - local
+      - staging
+  kms-key-arn:
+    prod: "arn:aws:kms:ap-southeast-1:278652492122:key/2433f850-eddd-4aaa-8b18-54f70ed066e5"
+
+resources:
+  Resources:
+    xenditWebhookQueue:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: "arn:aws:sqs:${self:provider.region}:044382218614:lista-dev-webhook-xendit"
+        RedrivePolicy:
+          deadLetterTargetArn:
+            Fn::GetAtt:
+              - "xenditWebhookDlq"
+              - "Arn"
+          maxReceiveCount: "5"
+
+    xenditWebhookDlq:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: "arn:aws:sqs:${self:provider.region}:044382218614:lista-dev-webhook-xendit-dlq"
+
+functions:
+  xenditWebhooks:
+    handler: src/main.xenditWebhook
+
+plugins:
+  - serverless-plugin-typescript
+  - serverless-offline-ssm
+  - serverless-offline
+  - serverless-iam-roles-per-function
